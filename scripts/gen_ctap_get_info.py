@@ -153,9 +153,11 @@ def build_segments(c, restrict_algorithms=False, builtin_uv=False):
     after_versions += encode_uint(c['GI_RESP_OPTIONS'])
     after_versions += encode_map_header(10 if builtin_uv else 9)
     after_versions += encode_text("rk") + encode_bool(True)
+    builtin_uv_marker = b'\xF0BUILTINUV'
     if builtin_uv:
-        # Built-in user verification (e.g. a fingerprint sensor) is present and configured.
-        after_versions += encode_text("uv") + encode_bool(True)
+        # Built-in user verification (e.g. a fingerprint sensor): present; the runtime fills in whether it is
+        # configured (e.g. a finger is enrolled).
+        after_versions += encode_text("uv") + builtin_uv_marker
     after_versions += encode_text("alwaysUv")
     always_uv_marker = b'\xF0ALWAYSUV'
     after_versions += always_uv_marker
@@ -203,6 +205,7 @@ def build_segments(c, restrict_algorithms=False, builtin_uv=False):
 
     chunks = [("cbor_gi_after_versions", bytes(after_versions))]
     markers = [
+        (builtin_uv_marker, "builtin_uv"),
         (always_uv_marker, "always_uv"),
         (client_pin_marker, "client_pin"),
         (make_cred_uv_not_rqd_marker, "make_cred_uv_not_rqd"),

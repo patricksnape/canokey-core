@@ -120,6 +120,8 @@ uint8_t wait_for_user_presence(uint8_t entry);
 int device_user_presence_poll(uint8_t first);
 // Remaining built-in UV attempts reported by clientPIN getUVRetries (CTAP_BUILTIN_UV builds).
 int device_builtin_uv_retries(void);
+// Whether built-in UV is configured (e.g. at least one finger enrolled); getInfo reports it as option "uv".
+int device_builtin_uv_configured(void);
 int strong_user_presence_test(void);
 int send_keepalive_during_processing(uint8_t entry);
 void device_loop(void);

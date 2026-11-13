@@ -150,7 +150,8 @@ typedef struct {
   size_t len;
 } CTAP_const_stream_segment;
 
-#define CTAP_CONST_STREAM_MAX_SEGMENTS 24
+// +2 for the runtime built-in UV option in getInfo (CTAP_BUILTIN_UV), plus headroom.
+#define CTAP_CONST_STREAM_MAX_SEGMENTS 28
 #define CTAP_CONST_STREAM_INLINE_BYTES 48
 
 typedef struct {
@@ -1927,6 +1928,8 @@ static uint8_t ctap_make_credential(CborEncoder *encoder, uint8_t *params, size_
   bool builtin_uv_up = false; // built-in UV (fingerprint) also proved user presence
   if (mc->options.uv == OPTION_TRUE) {
 #if CTAP_BUILTIN_UV
+    //     2) If the built-in user verification method has not yet been enabled, return CTAP2_ERR_INVALID_OPTION.
+    if (!device_builtin_uv_configured()) return CTAP2_ERR_INVALID_OPTION;
     //     Built-in user verification: the platform's presence method verifies the user (e.g. fingerprint match).
     WAIT(CTAP2_ERR_OPERATION_DENIED);
     uv = true;
@@ -2201,6 +2204,8 @@ static uint8_t ctap_get_assertion(CborEncoder *encoder, uint8_t *params, size_t 
   //    c. If the "uv" option is true then
   if (ga_state.options.uv == OPTION_TRUE) {
 #if CTAP_BUILTIN_UV
+    //     2) If the built-in user verification method has not yet been enabled, return CTAP2_ERR_INVALID_OPTION.
+    if (!device_builtin_uv_configured()) return CTAP2_ERR_INVALID_OPTION;
     //     Built-in user verification: the platform's presence method verifies the user (e.g. fingerprint match).
     //     Skipped in GetNextAssertion, which reuses the first assertion's result.
     if (ga_state.credential_counter == 0) {
@@ -2582,8 +2587,16 @@ static int ctap_prepare_get_info_stream(CTAPHID_TxSource *source) {
       ctap_const_stream_add_mem(state, always_uv ? cbor_gi_versions_without_u2f : cbor_gi_versions_with_u2f,
                                 always_uv ? sizeof(cbor_gi_versions_without_u2f) : sizeof(cbor_gi_versions_with_u2f)) !=
           0 ||
+#if CTAP_BUILTIN_UV
+      ctap_const_stream_add_mem(state, cbor_gi_after_versions_before_builtin_uv,
+                                sizeof(cbor_gi_after_versions_before_builtin_uv)) != 0 ||
+      cbor_put_bool_inline(state, device_builtin_uv_configured() != 0) != 0 ||
+      ctap_const_stream_add_mem(state, cbor_gi_after_builtin_uv_before_always_uv,
+                                sizeof(cbor_gi_after_builtin_uv_before_always_uv)) != 0 ||
+#else
       ctap_const_stream_add_mem(state, cbor_gi_after_versions_before_always_uv,
                                 sizeof(cbor_gi_after_versions_before_always_uv)) != 0 ||
+#endif
       cbor_put_bool_inline(state, always_uv) != 0 ||
       ctap_const_stream_add_mem(state, cbor_gi_after_always_uv_before_client_pin,
                                 sizeof(cbor_gi_after_always_uv_before_client_pin)) != 0 ||
@@ -2786,6 +2799,7 @@ static uint8_t __attribute__((noinline)) ctap_client_pin(CborEncoder *encoder, c
     // https://fidoalliance.org/specs/fido-v2.1-ps-20210615/fido-client-to-authenticator-protocol-v2.1-ps-errata-20220621.html#getPinUvAuthTokenUsingUvWithPermissions
     DBG_MSG("Subcommand Get PinUvAuthToken using built-in UV\n");
     if (cp.permissions == 0) return CTAP1_ERR_INVALID_PARAMETER;
+    if (!device_builtin_uv_configured()) return CTAP2_ERR_NOT_ALLOWED;
     ret = cp_decapsulate(cp.key_agreement, cp.pin_uv_auth_protocol);
     CHECK_PARSER_RET(ret);
     // Built-in UV through the platform's presence method (a fingerprint touch proves presence too).
