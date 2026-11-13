@@ -106,6 +106,10 @@ typedef struct {
 } APDU_RESPONSE_SOURCE;
 
 static uint8_t applet_enabled_on_transport(enum APPLET applet, apdu_transport_t transport) {
+#if CANOKEY_CCID_PIV_ONLY
+  // A platform that adds CCID only for PIV: no other applet answers there (admin, OpenPGP, OATH, FIDO over CCID).
+  if (transport == APDU_TRANSPORT_CCID && applet != APPLET_PIV) return 0;
+#endif
   switch (applet) {
   case APPLET_OPENPGP:
     return transport == APDU_TRANSPORT_NFC ? device_config_is_openpgp_nfc_enabled()
