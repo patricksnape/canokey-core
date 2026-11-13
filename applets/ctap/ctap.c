@@ -74,8 +74,12 @@
     send_keepalive_during_processing(current_cmd_src == CTAP_SRC_HID ? WAIT_ENTRY_CTAPHID : WAIT_ENTRY_CCID);          \
   } while (0)
 
+#ifdef CTAP_AAGUID_INIT
+static const uint8_t aaguid[] = {CTAP_AAGUID_INIT};
+#else
 static const uint8_t aaguid[] = {0x24, 0x4e, 0xb2, 0x9e, 0xe0, 0x90, 0x4e, 0x49,
                                  0x81, 0xfe, 0x1f, 0x20, 0xf8, 0xd3, 0xb8, 0xf4};
+#endif
 
 typedef struct {
   uint8_t last_subcommand;

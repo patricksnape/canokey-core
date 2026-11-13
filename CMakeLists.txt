@@ -10,6 +10,7 @@ option(ENABLE_DEBUG_OUTPUT "Print debug messages" ON)
 option(ENABLE_BYPASS_USER_PRESENCE "Skip all user-presence tests (USE AT YOUR OWN RISK)" OFF)
 option(CTAP_RESTRICT_ALGORITHMS "Restrict FIDO credential algorithms to ES256 and Ed25519" OFF)
 option(CTAP_BUILTIN_UV "Platform provides built-in user verification through wait_for_user_presence()" OFF)
+set(CTAP_AAGUID "" CACHE STRING "Authenticator AAGUID as 32 hex digits (empty: CanoKey's)")
 option(VIRTCARD "Virt Card" OFF)
 
 set(CMAKE_C_STANDARD 11)
@@ -110,6 +111,7 @@ add_custom_command(
             ${CANOKEY_RELEASE_VERSION_HEADER}
         --restrict-algorithms $<BOOL:${CTAP_RESTRICT_ALGORITHMS}>
         --builtin-uv $<BOOL:${CTAP_BUILTIN_UV}>
+        --aaguid "${CTAP_AAGUID}"
         --credential-id-size 70
         --output ${CMAKE_CURRENT_BINARY_DIR}/ctap_get_info_cbor.inc
     DEPENDS
@@ -220,6 +222,15 @@ if(ENABLE_APDU_REPLAY)
     list(APPEND canokey_core_public_defs TEST)
 endif(ENABLE_APDU_REPLAY)
 
+if(CTAP_AAGUID)
+    string(LENGTH "${CTAP_AAGUID}" _aaguid_len)
+    if(NOT _aaguid_len EQUAL 32)
+        message(FATAL_ERROR "CTAP_AAGUID must be 32 hex digits")
+    endif()
+    string(REGEX REPLACE "([0-9a-fA-F][0-9a-fA-F])" "0x\\1," _aaguid_init "${CTAP_AAGUID}")
+    string(REGEX REPLACE ",$" "" _aaguid_init "${_aaguid_init}")
+    list(APPEND canokey_core_private_defs "CTAP_AAGUID_INIT=${_aaguid_init}")
+endif()
 target_compile_definitions(
     canokey-core
     PUBLIC ${canokey_core_public_defs}
