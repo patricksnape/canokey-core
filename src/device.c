@@ -95,6 +95,8 @@ __weak int device_user_presence_poll(uint8_t first) {
   return DEVICE_UP_POLL_IDLE;
 }
 
+__weak int device_builtin_uv_retries(void) { return 8; }
+
 uint8_t wait_for_user_presence(uint8_t entry) {
   device_applet_session_owner_t owner = device_applet_session_owner();
   if (owner == DEVICE_APPLET_SESSION_NONE) {

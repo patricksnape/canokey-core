@@ -1415,6 +1415,11 @@ static uint8_t parse_client_pin_impl(CborParser *parser, CTAP_client_pin *cp, co
       ((cp->parsed_params & PARAM_PERMISSIONS) != 0 || (cp->parsed_params & PARAM_RP) != 0))
     return CTAP1_ERR_INVALID_PARAMETER;
 
+  if (cp->sub_command == CP_CMD_GET_PIN_UV_AUTH_TOKEN_USING_UV_WITH_PERMISSIONS &&
+      ((cp->parsed_params & PARAM_PIN_UV_AUTH_PROTOCOL) == 0 || (cp->parsed_params & PARAM_KEY_AGREEMENT) == 0 ||
+       (cp->parsed_params & PARAM_PERMISSIONS) == 0))
+    return CTAP2_ERR_MISSING_PARAMETER;
+
   if (cp->sub_command == CP_CMD_GET_PIN_UV_AUTH_TOKEN_USING_PIN_WITH_PERMISSIONS &&
       ((cp->parsed_params & PARAM_PIN_UV_AUTH_PROTOCOL) == 0 || (cp->parsed_params & PARAM_KEY_AGREEMENT) == 0 ||
        (cp->parsed_params & PARAM_PIN_HASH_ENC) == 0 || (cp->parsed_params & PARAM_PERMISSIONS) == 0))

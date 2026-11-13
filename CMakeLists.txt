@@ -9,6 +9,7 @@ option(ENABLE_APDU_REPLAY "Build the differential-fuzz APDU replay tool (card se
 option(ENABLE_DEBUG_OUTPUT "Print debug messages" ON)
 option(ENABLE_BYPASS_USER_PRESENCE "Skip all user-presence tests (USE AT YOUR OWN RISK)" OFF)
 option(CTAP_RESTRICT_ALGORITHMS "Restrict FIDO credential algorithms to ES256 and Ed25519" OFF)
+option(CTAP_BUILTIN_UV "Platform provides built-in user verification through wait_for_user_presence()" OFF)
 option(VIRTCARD "Virt Card" OFF)
 
 set(CMAKE_C_STANDARD 11)
@@ -108,6 +109,7 @@ add_custom_command(
             ${CMAKE_CURRENT_SOURCE_DIR}/applets/ctap/cose-key.h
             ${CANOKEY_RELEASE_VERSION_HEADER}
         --restrict-algorithms $<BOOL:${CTAP_RESTRICT_ALGORITHMS}>
+        --builtin-uv $<BOOL:${CTAP_BUILTIN_UV}>
         --credential-id-size 70
         --output ${CMAKE_CURRENT_BINARY_DIR}/ctap_get_info_cbor.inc
     DEPENDS
@@ -172,6 +174,7 @@ add_library(canokey-core ${SRC})
 
 set(canokey_core_public_defs
     CTAP_RESTRICT_ALGORITHMS=$<BOOL:${CTAP_RESTRICT_ALGORITHMS}>
+    CTAP_BUILTIN_UV=$<BOOL:${CTAP_BUILTIN_UV}>
     ENABLE_NFC=$<BOOL:${ENABLE_NFC}>
     ENABLE_APPLET_NDEF=$<BOOL:${ENABLE_APPLET_NDEF}>
     ENABLE_PASS=$<BOOL:${ENABLE_PASS}>

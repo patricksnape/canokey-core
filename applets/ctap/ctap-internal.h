@@ -169,10 +169,13 @@
 #define CP_CMD_SET_PIN                                          0x03
 #define CP_CMD_CHANGE_PIN                                       0x04
 #define CP_CMD_GET_PIN_TOKEN                                    0x05
+#define CP_CMD_GET_PIN_UV_AUTH_TOKEN_USING_UV_WITH_PERMISSIONS  0x06
+#define CP_CMD_GET_UV_RETRIES                                   0x07
 #define CP_CMD_GET_PIN_UV_AUTH_TOKEN_USING_PIN_WITH_PERMISSIONS 0x09
 #define CP_RESP_KEY_AGREEMENT                                   0x01
 #define CP_RESP_PIN_UV_AUTH_TOKEN                               0x02
 #define CP_RESP_PIN_RETRIES                                     0x03
+#define CP_RESP_UV_RETRIES                                      0x05
 #define CP_PERMISSION_MC                                        0x01
 #define CP_PERMISSION_GA                                        0x02
 #define CP_PERMISSION_CM                                        0x04

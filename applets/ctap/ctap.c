@@ -65,6 +65,9 @@
   } while (0)
 #endif
 
+// "Protected by some form of user verification" (CTAP 2.1): a PIN is set, or the platform provides built-in UV.
+#define CTAP_UV_PROTECTED(pin_set) ((pin_set) || CTAP_BUILTIN_UV)
+
 #define KEEPALIVE()                                                                                                    \
   do {                                                                                                                 \
     if (is_nfc()) break;                                                                                               \
@@ -1891,13 +1894,21 @@ static uint8_t ctap_make_credential(CborEncoder *encoder, uint8_t *params, size_
   //    b. If the pin_uv_auth_param is present, let the "uv" option be treated as being present with the value false.
   if (mc->parsed_params & PARAM_PIN_UV_AUTH_PARAM) mc->options.uv = OPTION_FALSE;
   //    c. If the "uv" option is true then
+  bool builtin_uv_up = false; // built-in UV (fingerprint) also proved user presence
   if (mc->options.uv == OPTION_TRUE) {
+#if CTAP_BUILTIN_UV
+    //     Built-in user verification: the platform's presence method verifies the user (e.g. fingerprint match).
+    WAIT(CTAP2_ERR_OPERATION_DENIED);
+    uv = true;
+    builtin_uv_up = true;
+#else
     //     1) If the authenticator does not support a built-in user verification method end the operation
     //        by returning CTAP2_ERR_INVALID_OPTION.
     DBG_MSG("Rule 5-c-1 not satisfied.\n");
     return CTAP2_ERR_INVALID_OPTION;
     //     2) [N/A] If the built-in user verification method has not yet been enabled, end the operation
     //        by returning CTAP2_ERR_INVALID_OPTION.
+#endif
   }
   //    d. If the "rk" option is present then: DO NOTHING
   //    e. Else: (the "rk" option is absent): Let the "rk" option be treated as being present with the value false.
@@ -1922,7 +1933,7 @@ static uint8_t ctap_make_credential(CborEncoder *encoder, uint8_t *params, size_
   //    b) [ALWAYS TRUE] The "uv" option is set to false.
   //    c) The pin_uv_auth_param parameter is not present.
   //    d) The "rk" option is present and set to true.
-  if (pin_set /* a) */ && (mc->parsed_params & PARAM_PIN_UV_AUTH_PARAM) == 0 /* c) */ &&
+  if (CTAP_UV_PROTECTED(pin_set) /* a) */ && (mc->parsed_params & PARAM_PIN_UV_AUTH_PARAM) == 0 /* c) */ &&
       mc->options.rk == OPTION_TRUE) {
     // If ClientPin option ID is true and the noMcGaPermissionsWithClientPin option ID is absent or false,
     // end the operation by returning CTAP2_ERR_PUAT_REQUIRED.
@@ -1948,7 +1959,7 @@ static uint8_t ctap_make_credential(CborEncoder *encoder, uint8_t *params, size_
   }
 
   // 11. If the authenticator is protected by some form of user verification, then:
-  if (pin_set) {
+  if (CTAP_UV_PROTECTED(pin_set)) {
     //   11.1 If pin_uv_auth_param parameter is present (implying the "uv" option is false (see Step 5)):
     if (mc->parsed_params & PARAM_PIN_UV_AUTH_PARAM) {
       uint8_t err = verify_pin_uv_auth_token(mc->client_data_hash, mc->pin_uv_auth_param, mc->pin_uv_auth_protocol,
@@ -2012,7 +2023,9 @@ step12:
 
   // 14. [ALWAYS TRUE] If the "up" option is set to true
   //     a) If the pin_uv_auth_param parameter is present then:
-  if (mc->parsed_params & PARAM_PIN_UV_AUTH_PARAM) {
+  if (builtin_uv_up) {
+    // Built-in UV in step 5 already collected user presence.
+  } else if (mc->parsed_params & PARAM_PIN_UV_AUTH_PARAM) {
     if (!cp_get_user_present_flag_value()) {
       WAIT(CTAP2_ERR_OPERATION_DENIED);
     }
@@ -2080,6 +2093,8 @@ static uint8_t ctap_get_assertion(CborEncoder *encoder, uint8_t *params, size_t 
   ecc_key_t key __attribute__((cleanup(ecc_key_cleanup))) = {0};
   CborParser parser;
   int ret;
+  // Built-in UV (fingerprint) also proved user presence. Declared before the GetNextAssertion goto below.
+  bool builtin_uv_up = false;
 
   if (!in_get_next_assertion) {
     ga_state.credential_counter = 0;
@@ -2155,12 +2170,22 @@ static uint8_t ctap_get_assertion(CborEncoder *encoder, uint8_t *params, size_t 
   if (ga_state.parsed_params & PARAM_PIN_UV_AUTH_PARAM) ga_state.options.uv = OPTION_FALSE;
   //    c. If the "uv" option is true then
   if (ga_state.options.uv == OPTION_TRUE) {
+#if CTAP_BUILTIN_UV
+    //     Built-in user verification: the platform's presence method verifies the user (e.g. fingerprint match).
+    //     Skipped in GetNextAssertion, which reuses the first assertion's result.
+    if (ga_state.credential_counter == 0) {
+      WAIT(CTAP2_ERR_OPERATION_DENIED);
+      builtin_uv_up = true;
+    }
+    uv = true;
+#else
     //     1) If the authenticator does not support a built-in user verification method end the operation
     //        by returning CTAP2_ERR_INVALID_OPTION.
     DBG_MSG("Rule 4-c-1 not satisfied.\n");
     return CTAP2_ERR_INVALID_OPTION;
     //     2) [N/A] If the built-in user verification method has not yet been enabled, end the operation
     //        by returning CTAP2_ERR_INVALID_OPTION.
+#endif
   }
   //    d. If the "rk" option is present then: Return CTAP2_ERR_UNSUPPORTED_OPTION.
   if (ga_state.options.rk != OPTION_ABSENT) {
@@ -2178,7 +2203,7 @@ static uint8_t ctap_get_assertion(CborEncoder *encoder, uint8_t *params, size_t 
   // 6. If authenticator is protected by some form of user verification, then:
   //    6.2 [N/A] If the "uv" option is present and set to true
   //    6.1 If pin_uv_auth_param parameter is present
-  if (pin_set && (ga_state.parsed_params & PARAM_PIN_UV_AUTH_PARAM)) {
+  if (CTAP_UV_PROTECTED(pin_set) && (ga_state.parsed_params & PARAM_PIN_UV_AUTH_PARAM)) {
     uint8_t err = verify_pin_uv_auth_token(ga_state.client_data_hash, ga.pin_uv_auth_param, ga.pin_uv_auth_protocol,
                                            CP_PERMISSION_GA, ga_state.rp_id_hash);
     if (err) return err;
@@ -2277,7 +2302,9 @@ step7:
   //    Note: This step is skipped in authenticatorGetNextAssertion
   if (ga_state.credential_counter == 0 && ga_state.options.up == OPTION_TRUE) {
     //    a) If the pin_uv_auth_param parameter is present then:
-    if (ga_state.parsed_params & PARAM_PIN_UV_AUTH_PARAM) {
+    if (builtin_uv_up) {
+      // Built-in UV in step 4 already collected user presence.
+    } else if (ga_state.parsed_params & PARAM_PIN_UV_AUTH_PARAM) {
       if (!cp_get_user_present_flag_value()) {
         WAIT(CTAP2_ERR_OPERATION_DENIED);
       }
@@ -2711,6 +2738,43 @@ static uint8_t __attribute__((noinline)) ctap_client_pin(CborEncoder *encoder, c
     if (ctap_note_pin_changed(pin_code_points) < 0) return CTAP2_ERR_UNHANDLED_REQUEST;
     cp_reset_pin_uv_auth_token();
     break;
+
+#if CTAP_BUILTIN_UV
+  case CP_CMD_GET_UV_RETRIES:
+    DBG_MSG("Subcommand Get UV Retries\n");
+    ret = cbor_encoder_create_map(encoder, &map, 1);
+    CHECK_CBOR_RET(ret);
+    ret = cbor_encode_int(&map, CP_RESP_UV_RETRIES);
+    CHECK_CBOR_RET(ret);
+    ret = cbor_encode_int(&map, device_builtin_uv_retries());
+    CHECK_CBOR_RET(ret);
+    ret = cbor_encoder_close_container(encoder, &map);
+    CHECK_CBOR_RET(ret);
+    break;
+
+  case CP_CMD_GET_PIN_UV_AUTH_TOKEN_USING_UV_WITH_PERMISSIONS:
+    // https://fidoalliance.org/specs/fido-v2.1-ps-20210615/fido-client-to-authenticator-protocol-v2.1-ps-errata-20220621.html#getPinUvAuthTokenUsingUvWithPermissions
+    DBG_MSG("Subcommand Get PinUvAuthToken using built-in UV\n");
+    if (cp.permissions == 0) return CTAP1_ERR_INVALID_PARAMETER;
+    ret = cp_decapsulate(cp.key_agreement, cp.pin_uv_auth_protocol);
+    CHECK_PARSER_RET(ret);
+    // Built-in UV through the platform's presence method (a fingerprint touch proves presence too).
+    WAIT(CTAP2_ERR_UV_INVALID);
+    cp_reset_pin_uv_auth_token();
+    cp_begin_using_uv_auth_token(true);
+    cp_set_permission(cp.permissions);
+    if (cp.parsed_params & PARAM_RP) cp_associate_rp_id(cp.rp_id_hash);
+    cp_encrypt_pin_token(cp.key_agreement, buf, cp.pin_uv_auth_protocol);
+    ret = cbor_encoder_create_map(encoder, &map, 1);
+    CHECK_CBOR_RET(ret);
+    ret = cbor_encode_int(&map, CP_RESP_PIN_UV_AUTH_TOKEN);
+    CHECK_CBOR_RET(ret);
+    ret = cbor_encode_byte_string(&map, buf, cp.pin_uv_auth_protocol == 1 ? PIN_TOKEN_SIZE : PIN_TOKEN_SIZE + 16);
+    CHECK_CBOR_RET(ret);
+    ret = cbor_encoder_close_container(encoder, &map);
+    CHECK_CBOR_RET(ret);
+    break;
+#endif
 
   case CP_CMD_GET_PIN_TOKEN:
   case CP_CMD_GET_PIN_UV_AUTH_TOKEN_USING_PIN_WITH_PERMISSIONS:
@@ -3314,9 +3378,9 @@ static uint8_t __attribute__((noinline)) ctap_config(CborEncoder *encoder, const
   if (pin_state < 0) return CTAP2_ERR_UNHANDLED_REQUEST;
   const bool pin_set = pin_state > 0;
   const bool always_uv = ctap_config_always_uv_enabled();
-  const bool auth_required = pin_set || always_uv;
+  const bool auth_required = CTAP_UV_PROTECTED(pin_set) || always_uv;
   const bool unauthenticated_always_uv_disable =
-      cfg.sub_command == CONFIG_CMD_TOGGLE_ALWAYS_UV && !pin_set && always_uv;
+      cfg.sub_command == CONFIG_CMD_TOGGLE_ALWAYS_UV && !CTAP_UV_PROTECTED(pin_set) && always_uv;
 
   if (auth_required && !unauthenticated_always_uv_disable) {
     if (!(cfg.parsed_params & PARAM_PIN_UV_AUTH_PARAM)) return CTAP2_ERR_PUAT_REQUIRED;
@@ -3495,7 +3559,7 @@ static uint8_t __attribute__((noinline)) ctap_large_blobs(const uint8_t *params,
     }
     //    e) If the authenticator is protected by some form of user verification
     //       or the alwaysUv option ID is present and true:
-    if (pin_set) {
+    if (CTAP_UV_PROTECTED(pin_set)) {
       //     i. If pinUvAuthParam is absent from the input map, then end the operation by
       //        returning CTAP2_ERR_PUAT_REQUIRED.
       if (!(lb.parsed_params & PARAM_PIN_UV_AUTH_PARAM)) {
