@@ -113,6 +113,11 @@ bool testmode_err_triggered(const char *filename, bool file_wr);
 
 // platform independent functions
 uint8_t wait_for_user_presence(uint8_t entry);
+#define DEVICE_UP_POLL_IDLE 0
+#define DEVICE_UP_POLL_PRESENT 1
+#define DEVICE_UP_POLL_DENY (-1)
+#define DEVICE_UP_POLL_BUSY 2
+int device_user_presence_poll(uint8_t first);
 int strong_user_presence_test(void);
 int send_keepalive_during_processing(uint8_t entry);
 void device_loop(void);

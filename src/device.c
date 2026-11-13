@@ -83,6 +83,18 @@ uint8_t get_touch_result(void) {
 
 void set_touch_result(uint8_t result) { touch_result = result; }
 
+#ifndef CANOKEY_UP_TIMEOUT_MS
+#define CANOKEY_UP_TIMEOUT_MS 30000
+#endif
+
+// Platform hook polled while waiting for user presence (e.g. a fingerprint sensor).
+// Returns DEVICE_UP_POLL_IDLE (keep waiting), _PRESENT (user present), _DENY (fail now, e.g. no match)
+// or _BUSY (user activity in progress: restart the timeout). `first` is 1 on the first poll of a wait.
+__weak int device_user_presence_poll(uint8_t first) {
+  UNUSED(first);
+  return DEVICE_UP_POLL_IDLE;
+}
+
 uint8_t wait_for_user_presence(uint8_t entry) {
   device_applet_session_owner_t owner = device_applet_session_owner();
   if (owner == DEVICE_APPLET_SESSION_NONE) {
@@ -106,7 +118,21 @@ uint8_t wait_for_user_presence(uint8_t entry) {
 
   uint32_t start = device_get_tick();
   uint32_t last = start;
+  uint8_t first_poll = 1;
   while (get_touch_result() == TOUCH_NO) {
+    const int poll = device_user_presence_poll(first_poll);
+    first_poll = 0;
+    if (poll == DEVICE_UP_POLL_PRESENT) {
+      set_touch_result(TOUCH_SHORT);
+      break;
+    }
+    if (poll == DEVICE_UP_POLL_DENY) {
+      DBG_MSG("presence denied by platform\n");
+      stop_blinking();
+      wait_status = WAIT_NONE;
+      return USER_PRESENCE_TIMEOUT;
+    }
+    if (poll == DEVICE_UP_POLL_BUSY) start = device_get_tick();
     if (!device_usb_ready()) {
       stop_blinking();
       wait_status = WAIT_NONE;
@@ -131,7 +157,7 @@ uint8_t wait_for_user_presence(uint8_t entry) {
     }
 #endif
     uint32_t now = device_get_tick();
-    if (now - start >= 30000) {
+    if (now - start >= CANOKEY_UP_TIMEOUT_MS) {
       DBG_MSG("timeout at %u\n", now);
       stop_blinking();
       wait_status = WAIT_NONE;
