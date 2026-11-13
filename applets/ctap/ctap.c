@@ -750,12 +750,14 @@ static int cbor_put_int(uint8_t **p, int64_t v) {
   return cbor_put_uint(p, (uint64_t)(-1 - v), 0x20);
 }
 
+#if !CTAP_RESTRICT_ALGORITHMS // only getInfo's configurable SM2 id uses it
 static int cbor_put_int_inline(CTAP_const_stream_state *state, int64_t value) {
   uint8_t encoded[9];
   uint8_t *p = encoded;
   if (cbor_put_int(&p, value) < 0) return -1;
   return ctap_const_stream_add_inline(state, encoded, (size_t)(p - encoded));
 }
+#endif
 
 static int cbor_put_bool_inline(CTAP_const_stream_state *state, bool value) {
   return ctap_const_stream_add_byte(state, value ? 0xF5 : 0xF4);

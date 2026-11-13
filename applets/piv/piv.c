@@ -659,7 +659,9 @@ static key_type_t algo_id_to_key_type(const uint8_t id) {
   if (id == alg_ext_cfg.secp256k1) return SECP256K1;
   if (id == alg_ext_cfg.secp521r1) return SECP521R1;
   if (id == alg_ext_cfg.sm2) return SM2;
+#ifndef KBAUTH_NO_MLDSA // kbauth CONFIG_KBAUTH_MLDSA=n: no ML-DSA keys (0xE2 is an unknown algorithm)
   if (id == alg_ext_cfg.mldsa65) return MLDSA65;
+#endif
   if (id == alg_ext_cfg.mlkem768) return MLKEM768;
   return KEY_TYPE_PKC_END;
 }
