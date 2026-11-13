@@ -11,6 +11,8 @@ option(ENABLE_BYPASS_USER_PRESENCE "Skip all user-presence tests (USE AT YOUR OW
 option(CTAP_RESTRICT_ALGORITHMS "Restrict FIDO credential algorithms to ES256 and Ed25519" OFF)
 option(CTAP_BUILTIN_UV "Platform provides built-in user verification through wait_for_user_presence()" OFF)
 set(CTAP_AAGUID "" CACHE STRING "Authenticator AAGUID as 32 hex digits (empty: CanoKey's)")
+set(CTAP_TRANSPORTS "nfc,usb" CACHE STRING "getInfo transports, comma separated (usb, nfc, ble, ...)")
+set(CTAP_TRANSPORTS_FOR_RESET "nfc,usb" CACHE STRING "getInfo transportsForReset, comma separated")
 option(VIRTCARD "Virt Card" OFF)
 
 set(CMAKE_C_STANDARD 11)
@@ -112,6 +114,8 @@ add_custom_command(
         --restrict-algorithms $<BOOL:${CTAP_RESTRICT_ALGORITHMS}>
         --builtin-uv $<BOOL:${CTAP_BUILTIN_UV}>
         --aaguid "${CTAP_AAGUID}"
+        --transports "${CTAP_TRANSPORTS}"
+        --transports-for-reset "${CTAP_TRANSPORTS_FOR_RESET}"
         --credential-id-size 70
         --output ${CMAKE_CURRENT_BINARY_DIR}/ctap_get_info_cbor.inc
     DEPENDS

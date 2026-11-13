@@ -110,6 +110,8 @@ def encode_map_header(n):
     return bytes([0xB8, n])
 
 
+TRANSPORTS = ["nfc", "usb"]            # --transports
+TRANSPORTS_FOR_RESET = ["nfc", "usb"]  # --transports-for-reset
 AAGUID = bytes([0x24, 0x4E, 0xB2, 0x9E, 0xE0, 0x90, 0x4E, 0x49,
                 0x81, 0xFE, 0x1F, 0x20, 0xF8, 0xD3, 0xB8, 0xF4])
 
@@ -186,7 +188,7 @@ def build_segments(c, restrict_algorithms=False, builtin_uv=False):
     after_versions += encode_uint(c['GI_RESP_MAX_CREDENTIAL_ID_LENGTH'])
     after_versions += encode_uint(c['CREDENTIAL_ID_SIZE'])
     after_versions += encode_uint(c['GI_RESP_TRANSPORTS'])
-    after_versions += encode_array_header(2) + encode_text("nfc") + encode_text("usb")
+    after_versions += encode_array_header(len(TRANSPORTS)) + b"".join(encode_text(t) for t in TRANSPORTS)
     after_versions += encode_uint(c['GI_RESP_ALGORITHMS'])
     after_versions += encode_array_header(2 if restrict_algorithms else 4)
     after_versions += algorithm_entry(c['COSE_ALG_ES256'])
@@ -247,7 +249,7 @@ def build_segments(c, restrict_algorithms=False, builtin_uv=False):
     long_touch_marker = b'\xF0LONGTOUCH'
     suffix += long_touch_marker
     suffix += encode_uint(c['GI_RESP_TRANSPORTS_FOR_RESET'])
-    suffix += encode_array_header(2) + encode_text("nfc") + encode_text("usb")
+    suffix += encode_array_header(len(TRANSPORTS_FOR_RESET)) + b"".join(encode_text(t) for t in TRANSPORTS_FOR_RESET)
     suffix += encode_uint(c['GI_RESP_MAX_PIN_LENGTH'])
     max_pin_marker = b'\xF0MAXPIN'
     suffix += max_pin_marker
@@ -305,8 +307,18 @@ def main():
     parser.add_argument("--restrict-algorithms", type=int, choices=(0, 1), default=0)
     parser.add_argument("--builtin-uv", type=int, choices=(0, 1), default=0)
     parser.add_argument("--aaguid", default="", help="32 hex digits; default: CanoKey's AAGUID")
+    parser.add_argument("--transports", default="nfc,usb",
+                        help="getInfo transports (0x09), comma separated: usb, nfc, ble, smart-card, hybrid, internal")
+    parser.add_argument("--transports-for-reset", default="nfc,usb", help="getInfo transportsForReset (0x1A)")
     parser.add_argument("--output", required=True)
     args = parser.parse_args()
+    global TRANSPORTS, TRANSPORTS_FOR_RESET
+    known = {"usb", "nfc", "ble", "smart-card", "hybrid", "internal"}
+    TRANSPORTS = [t for t in args.transports.split(",") if t]
+    TRANSPORTS_FOR_RESET = [t for t in args.transports_for_reset.split(",") if t]
+    for t in TRANSPORTS + TRANSPORTS_FOR_RESET:
+        if t not in known:
+            parser.error(f"unknown transport {t!r}")
 
     needed = {
         'GI_RESP_VERSIONS': None,
