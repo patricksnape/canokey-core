@@ -2599,9 +2599,11 @@ __attribute__((noinline)) static int piv_generate_asymmetric_key_pair(const CAPD
   key.meta.type = algo_id_to_key_type(DATA[4]);
   if (key.meta.type == KEY_TYPE_PKC_END) EXCEPT(SW_WRONG_DATA);
   if (P2 == 0xF9 && key.meta.type != SECP256R1) EXCEPT(SW_WRONG_DATA);
-#ifdef KBAUTH_NO_RSA4096_KEYGEN
-  // kbauth: generating an RSA-4096 key takes many minutes on a small MCU (prime search); import one instead.
-  if (key.meta.type == RSA4096) EXCEPT(SW_WRONG_DATA);
+#ifdef KBAUTH_RSA_KEYGEN_MAX_BITS
+  // kbauth: generating a large RSA key takes many minutes on a small MCU (prime search); import one instead.
+  if ((key.meta.type == RSA3072 && KBAUTH_RSA_KEYGEN_MAX_BITS < 3072) ||
+      (key.meta.type == RSA4096 && KBAUTH_RSA_KEYGEN_MAX_BITS < 4096))
+    EXCEPT(SW_WRONG_DATA);
 #endif
   const int err = ck_parse_piv_policies(&key, &DATA[5], LC - 5);
   if (err != 0) {
