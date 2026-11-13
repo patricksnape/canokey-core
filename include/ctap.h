@@ -21,6 +21,11 @@ typedef apdu_request_close_t ctap_req_close_t;
 typedef apdu_request_source_t ctap_req_src_t;
 
 uint8_t ctap_install(uint8_t reset);
+// Platform hooks for the CTAP master keys (KH = credential key handles, HE = hmac-secret / largeBlobKey).
+// Weak defaults in the CTAP applet keep the keys in LittleFS.
+int ctap_platform_master_keys_install(const uint8_t kh_key[32], const uint8_t he_key[32]);
+int ctap_platform_kh_derive(const uint8_t nonce[16], uint8_t out[32]);
+int ctap_platform_he_derive(uint8_t variant, const uint8_t nonce[16], uint8_t out[32]);
 void ctap_poweroff(void);
 void ctap_deselect(void);
 void ctap_schedule_runtime_reset(void);

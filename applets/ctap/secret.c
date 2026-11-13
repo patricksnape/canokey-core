@@ -287,15 +287,50 @@ int increase_counter(uint32_t *counter) {
   return 0;
 }
 
-static void generate_credential_id_nonce_tag(credential_id *kh, uint8_t kh_key[KH_KEY_SIZE], ecc_key_t *key) {
+// Master-key derivations, overridable by the platform (e.g. computed inside a secure element so the master keys
+// never leave it). Defaults keep canokey's behaviour: keys stored in LittleFS attributes of CTAP_CERT_FILE.
+// out = hmac-sha256(KH_KEY, nonce)
+__attribute__((weak)) int ctap_platform_kh_derive(const uint8_t nonce[CREDENTIAL_NONCE_SIZE], uint8_t out[32]) {
+  uint8_t kh_key[KH_KEY_SIZE];
+  const int ret = read_kh_key(kh_key);
+  if (ret < 0) return ret;
+  hmac_sha256(kh_key, KH_KEY_SIZE, nonce, CREDENTIAL_NONCE_SIZE, out);
+  memzero(kh_key, KH_KEY_SIZE);
+  return 0;
+}
+
+// out = per-credential HE-derived key: variant 0 = hmac-secret CredRandom without UV, 1 = with UV,
+// 2 = largeBlobKey. Default: canokey's transforms of HE_KEY followed by hmac-sha256(.., nonce).
+__attribute__((weak)) int ctap_platform_he_derive(uint8_t variant, const uint8_t nonce[CREDENTIAL_NONCE_SIZE],
+                                                  uint8_t out[32]) {
+  uint8_t he_key[HE_KEY_SIZE];
+  int err = read_he_key(he_key);
+  if (err < 0) return err;
+  if (variant == 1) {
+    for (int i = 0; i < HE_KEY_SIZE; ++i)
+      he_key[i] = ~he_key[i];
+  } else if (variant == 2) {
+    he_key[0] ^= he_key[1];
+    he_key[1] ^= he_key[2];
+    he_key[HE_KEY_SIZE - 2] ^= he_key[0];
+    he_key[HE_KEY_SIZE - 1] ^= he_key[3];
+  }
+  hmac_sha256(he_key, HE_KEY_SIZE, nonce, CREDENTIAL_NONCE_SIZE, out);
+  memzero(he_key, HE_KEY_SIZE);
+  return 0;
+}
+
+static int generate_credential_id_nonce_tag(credential_id *kh, ecc_key_t *key) {
   // works for ECC algorithms with a 256-bit private key
   random_buffer(kh->nonce, CREDENTIAL_NONCE_SIZE);
   // private key = hmac-sha256(device private key, nonce)
-  hmac_sha256(kh_key, KH_KEY_SIZE, kh->nonce, sizeof(kh->nonce), key->pri);
+  const int ret = ctap_platform_kh_derive(kh->nonce, key->pri);
+  if (ret < 0) return ret;
   // tag = left(hmac-sha256(private key, rpIdHash or appid), 16), stored in kh.tag via key.pub
   hmac_sha256(key->pri, KH_KEY_SIZE, kh->rp_id_hash, sizeof(kh->rp_id_hash), key->pub);
   memcpy(kh->tag, key->pub, sizeof(kh->tag));
   DBG_MSG("Credential tag generated\n");
+  return 0;
 }
 
 enum {
@@ -335,7 +370,7 @@ bool check_credential_protect_requirements(credential_id *kh, bool with_cred_lis
 int generate_key_handle(credential_id *kh, uint8_t *pubkey_or_seed, int32_t alg_type, uint8_t dc, uint8_t cp,
                         bool third_party_payment) {
   ecc_key_t key;
-  uint8_t kh_key[KH_KEY_SIZE];
+  int ret;
 
   kh->alg_type = alg_type;
   const key_type_t key_type = cose_alg_to_key_type(alg_type);
@@ -348,12 +383,13 @@ int generate_key_handle(credential_id *kh, uint8_t *pubkey_or_seed, int32_t alg_
   kh->nonce[CREDENTIAL_NONCE_CP_POS] =
       (cp & CREDENTIAL_FLAG_CRED_PROTECT_MASK) | (third_party_payment ? CREDENTIAL_FLAG_THIRD_PARTY_PAYMENT : 0);
 
-  const int ret = read_kh_key(kh_key);
-  if (ret < 0) return ret;
-  do
-    generate_credential_id_nonce_tag(kh, kh_key, &key);
-  while (!cose_alg_is_mldsa65(alg_type) && ecc_complete_key(key_type, &key) < 0);
-  memzero(kh_key, KH_KEY_SIZE);
+  do {
+    ret = generate_credential_id_nonce_tag(kh, &key);
+    if (ret < 0) {
+      memzero(&key, sizeof(key));
+      return ret;
+    }
+  } while (!cose_alg_is_mldsa65(alg_type) && ecc_complete_key(key_type, &key) < 0);
 
   if (cose_alg_is_mldsa65(alg_type)) {
     memcpy(pubkey_or_seed, key.pri, PRI_KEY_SIZE);
@@ -368,11 +404,9 @@ int generate_key_handle(credential_id *kh, uint8_t *pubkey_or_seed, int32_t alg_
 }
 
 int verify_key_handle(const credential_id *kh, ecc_key_t *key) {
-  int ret = read_kh_key(key->pub); // use key.pub to store kh key first
-  if (ret < 0) return ret;
-
   // get private key
-  hmac_sha256(key->pub, KH_KEY_SIZE, kh->nonce, sizeof(kh->nonce), key->pri);
+  int ret = ctap_platform_kh_derive(kh->nonce, key->pri);
+  if (ret < 0) return ret;
   // get tag, store in key->pub, which should be verified first outside this function
   hmac_sha256(key->pri, KH_KEY_SIZE, kh->rp_id_hash, sizeof(kh->rp_id_hash), key->pub);
   if (memcmp_s(key->pub, kh->tag, sizeof(kh->tag)) != 0) {
@@ -510,16 +544,10 @@ int set_pin_retries(uint8_t ctr) { return write_attr(CTAP_CERT_FILE, PIN_CTR_ATT
 
 int make_hmac_secret_output(const uint8_t *nonce, const uint8_t *salt, uint8_t len, uint8_t *output, bool uv) {
   uint8_t hmac_buf[SHA256_DIGEST_LENGTH];
-  // use hmac-sha256(HE_KEY, credential_id::nonce) as CredRandom
-  int err = read_he_key(hmac_buf);
+  // use hmac-sha256(HE_KEY variant, credential_id::nonce) as CredRandom
+  int err = ctap_platform_he_derive(uv ? 1 : 0, nonce, hmac_buf);
   if (err < 0) return err;
 
-  if (uv) {
-    for (int i = 0; i < SHA256_DIGEST_LENGTH; ++i)
-      hmac_buf[i] = ~hmac_buf[i];
-  }
-
-  hmac_sha256(hmac_buf, HE_KEY_SIZE, nonce, CREDENTIAL_NONCE_SIZE, hmac_buf);
   hmac_sha256(hmac_buf, HE_KEY_SIZE, salt, 32, output);
   if (len == 64) hmac_sha256(hmac_buf, HE_KEY_SIZE, salt + 32, 32, output + 32);
   return 0;
@@ -528,15 +556,5 @@ int make_hmac_secret_output(const uint8_t *nonce, const uint8_t *salt, uint8_t l
 int make_large_blob_key(uint8_t *nonce, uint8_t *output) {
   static_assert(LARGE_BLOB_KEY_SIZE == HE_KEY_SIZE, "Reuse buffer");
   // use hmac-sha256(transform(HE_KEY), credential_id::nonce) as LargeBlobKey
-  int err = read_he_key(output);
-  if (err < 0) return err;
-
-  // make it different from hmac extension key
-  output[0] ^= output[1];
-  output[1] ^= output[2];
-  output[HE_KEY_SIZE - 2] ^= output[0];
-  output[HE_KEY_SIZE - 1] ^= output[3];
-
-  hmac_sha256(output, HE_KEY_SIZE, nonce, CREDENTIAL_NONCE_SIZE, output);
-  return 0;
+  return ctap_platform_he_derive(2, nonce, output);
 }

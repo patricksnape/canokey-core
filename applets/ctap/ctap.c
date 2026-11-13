@@ -1060,6 +1060,15 @@ void ctap_poweroff(void) {
   }
 }
 
+// Return 0 to keep canokey's behaviour (keys stored in LittleFS), 1 if the platform has taken the keys (zeroed
+// placeholders are stored instead), <0 on failure.
+__attribute__((weak)) int ctap_platform_master_keys_install(const uint8_t kh_key[KH_KEY_SIZE],
+                                                           const uint8_t he_key[HE_KEY_SIZE]) {
+  (void)kh_key;
+  (void)he_key;
+  return 0;
+}
+
 uint8_t ctap_install(uint8_t reset) {
   ctap_kh_cache_reset();
   CTAP_persistent_config persistent_cfg;
@@ -1101,10 +1110,27 @@ uint8_t ctap_install(uint8_t reset) {
   ctap_config_default(&cfg);
   if (ctap_config_store(&cfg) < 0) return CTAP2_ERR_UNHANDLED_REQUEST;
   if (write_file(MIN_PIN_RPIDS_FILE, NULL, 0, 0, 1) < 0) return CTAP2_ERR_UNHANDLED_REQUEST;
-  random_buffer(kh_key, sizeof(kh_key));
-  if (write_attr(CTAP_CERT_FILE, KH_KEY_ATTR, kh_key, sizeof(kh_key)) < 0) return CTAP2_ERR_UNHANDLED_REQUEST;
-  random_buffer(kh_key, sizeof(kh_key));
-  if (write_attr(CTAP_CERT_FILE, HE_KEY_ATTR, kh_key, sizeof(kh_key)) < 0) return CTAP2_ERR_UNHANDLED_REQUEST;
+  {
+    // Fresh master keys. A platform may take them (e.g. into a secure element) and store placeholders instead.
+    uint8_t he_key[HE_KEY_SIZE];
+    random_buffer(kh_key, sizeof(kh_key));
+    random_buffer(he_key, sizeof(he_key));
+    const int taken = ctap_platform_master_keys_install(kh_key, he_key);
+    if (taken < 0) {
+      memzero(kh_key, sizeof(kh_key));
+      memzero(he_key, sizeof(he_key));
+      return CTAP2_ERR_UNHANDLED_REQUEST;
+    }
+    if (taken) {
+      memzero(kh_key, sizeof(kh_key));
+      memzero(he_key, sizeof(he_key));
+    }
+    // The attributes also mark the install as complete (ctap_littlefs_state_present).
+    const int w1 = write_attr(CTAP_CERT_FILE, KH_KEY_ATTR, kh_key, sizeof(kh_key));
+    const int w2 = write_attr(CTAP_CERT_FILE, HE_KEY_ATTR, he_key, sizeof(he_key));
+    memzero(he_key, sizeof(he_key));
+    if (w1 < 0 || w2 < 0) return CTAP2_ERR_UNHANDLED_REQUEST;
+  }
   memcpy(
       kh_key,
       (uint8_t[]){0x80, 0x76, 0xbe, 0x8b, 0x52, 0x8d, 0x00, 0x75, 0xf7, 0xaa, 0xe9, 0x8d, 0x6f, 0xa5, 0x7a, 0x6d, 0x3c},
